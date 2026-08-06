@@ -129,3 +129,7 @@ On macOS, opening RFCOMM was observed to bring up A2DP as well, which can switch
 ## Safety and scope
 
 The Home Assistant integration exposes only commands confirmed by ThinQ captures. The standalone CLI has a `raw` subcommand for protocol research; it is deliberately not exposed through Home Assistant or Assist. Do not send unknown commands to production hardware.
+
+## License
+
+[MIT](LICENSE)
