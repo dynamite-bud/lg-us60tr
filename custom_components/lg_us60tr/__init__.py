@@ -21,7 +21,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: LGUS60TRConfigEntry) -> 
     _LOGGER.info("Setting up LG US60TR integration entry %s", entry.entry_id)
     coordinator = LGUS60TRCoordinator(hass, entry)
     entry.runtime_data = coordinator
-    await coordinator.async_config_entry_first_refresh()
+    coordinator.async_initialize()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _LOGGER.info("LG US60TR integration entry %s is ready", entry.entry_id)
     return True

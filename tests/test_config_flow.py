@@ -6,8 +6,13 @@ from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
-from custom_components.lg_us60tr.const import DEFAULT_NAME, DOMAIN
-from custom_components.lg_us60tr.core import SoundbarState
+from custom_components.lg_us60tr.const import (
+    CONF_LAST_INPUT_SOURCE,
+    CONF_POWERED,
+    DEFAULT_NAME,
+    DOMAIN,
+)
+from custom_components.lg_us60tr.core import InputSource, SoundbarState
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 
@@ -16,7 +21,10 @@ async def test_user_flow_creates_normalized_entry(hass: HomeAssistant) -> None:
     with (
         patch(
             "custom_components.lg_us60tr.config_flow.probe_soundbar",
-            return_value=SoundbarState(connected=True),
+            return_value=SoundbarState(
+                connected=True,
+                input_source=InputSource.HDMI_IN,
+            ),
         ),
         patch(
             "custom_components.lg_us60tr.async_setup_entry",
@@ -37,6 +45,10 @@ async def test_user_flow_creates_normalized_entry(hass: HomeAssistant) -> None:
     assert result["title"] == DEFAULT_NAME
     assert result["data"] == {CONF_ADDRESS: "00:11:22:33:44:55"}
     assert result["result"].unique_id == "001122334455"
+    assert result["result"].options == {
+        CONF_LAST_INPUT_SOURCE: int(InputSource.HDMI_IN),
+        CONF_POWERED: True,
+    }
 
 
 async def test_user_flow_rejects_invalid_address(hass: HomeAssistant) -> None:
@@ -88,3 +100,4 @@ async def test_user_flow_retries_after_connection_failure(hass: HomeAssistant) -
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"] == {CONF_ADDRESS: "68:52:10:77:2C:D1"}
+    assert result["result"].options == {CONF_POWERED: True}

@@ -8,7 +8,12 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_ADDRESS
 
-from .const import DEFAULT_NAME, DOMAIN
+from .const import (
+    CONF_LAST_INPUT_SOURCE,
+    CONF_POWERED,
+    DEFAULT_NAME,
+    DOMAIN,
+)
 from .coordinator import probe_soundbar
 
 _LOGGER = logging.getLogger(__name__)
@@ -34,7 +39,9 @@ class LGUS60TRConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 _LOGGER.debug("Validating RFCOMM access to soundbar %s", address)
                 try:
-                    await self.hass.async_add_executor_job(probe_soundbar, address)
+                    state = await self.hass.async_add_executor_job(
+                        probe_soundbar, address
+                    )
                 except (OSError, TimeoutError) as error:
                     _LOGGER.warning(
                         "Unable to connect to soundbar %s: %s", address, error
@@ -49,9 +56,13 @@ class LGUS60TRConfigFlow(ConfigFlow, domain=DOMAIN):
                     _LOGGER.info("Validated soundbar %s during config flow", address)
                     await self.async_set_unique_id(address.replace(":", "").lower())
                     self._abort_if_unique_id_configured()
+                    options: dict[str, Any] = {CONF_POWERED: True}
+                    if state.input_source is not None:
+                        options[CONF_LAST_INPUT_SOURCE] = int(state.input_source)
                     return self.async_create_entry(
                         title=DEFAULT_NAME,
                         data={CONF_ADDRESS: address},
+                        options=options,
                     )
 
         return self.async_show_form(

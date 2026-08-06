@@ -28,9 +28,5 @@ class LGUS60TREntity(CoordinatorEntity[LGUS60TRCoordinator]):
 
     @property
     def available(self) -> bool:
-        """Return whether the control channel is usable."""
-        return (
-            super().available
-            and self.coordinator.data is not None
-            and self.coordinator.data.connected
-        )
+        """Keep explicit controls available while the SPP session is released."""
+        return self.coordinator.data is not None

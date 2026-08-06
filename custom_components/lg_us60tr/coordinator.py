@@ -13,10 +13,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     COMMAND_TIMEOUT,
+    CONF_LAST_INPUT_SOURCE,
+    CONF_POWERED,
     CONNECT_TIMEOUT,
     DEFAULT_CHANNELS,
     DOMAIN,
-    UPDATE_INTERVAL,
 )
 from .core import InputSource, SoundbarClient, SoundbarState, SoundMode
 from .core.linux import LinuxRFCOMMTransport
@@ -25,7 +26,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class LGUS60TRCoordinator(DataUpdateCoordinator[SoundbarState]):
-    """Own the soundbar connection and serialize its blocking SPP operations."""
+    """Run explicit soundbar operations in short, phone-safe SPP sessions."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(
@@ -33,18 +34,23 @@ class LGUS60TRCoordinator(DataUpdateCoordinator[SoundbarState]):
             _LOGGER,
             config_entry=entry,
             name=DOMAIN,
-            update_interval=UPDATE_INTERVAL,
+            update_interval=None,
             always_update=False,
         )
+        self._entry = entry
         self.address: str = entry.data[CONF_ADDRESS]
         self._io_lock = threading.Lock()
-        self._shutting_down = False
         self._client = SoundbarClient(
-            LinuxRFCOMMTransport(self.address, DEFAULT_CHANNELS),
-            listener=self._state_received,
+            LinuxRFCOMMTransport(self.address, DEFAULT_CHANNELS)
         )
+        try:
+            self._preferred_source = InputSource(entry.options[CONF_LAST_INPUT_SOURCE])
+        except (KeyError, TypeError, ValueError):
+            self._preferred_source = None
+        stored_powered = entry.options.get(CONF_POWERED)
+        self._powered = stored_powered if isinstance(stored_powered, bool) else None
         _LOGGER.debug(
-            "Created coordinator for %s with RFCOMM channels %s",
+            "Created on-demand coordinator for %s with RFCOMM channels %s",
             self.address,
             DEFAULT_CHANNELS,
         )
@@ -54,31 +60,45 @@ class LGUS60TRCoordinator(DataUpdateCoordinator[SoundbarState]):
         """Return the active RFCOMM channel."""
         return self._client.channel
 
+    @property
+    def powered(self) -> bool | None:
+        """Return the last observed or commanded power state."""
+        return self._powered
+
+    @property
+    def preferred_source(self) -> InputSource | None:
+        """Return the input restored after a command-driven wake."""
+        return self._preferred_source
+
+    @callback
+    def async_initialize(self) -> None:
+        """Initialize entities from persisted state without opening Bluetooth."""
+        self.async_set_updated_data(SoundbarState(input_source=self._preferred_source))
+
     async def _async_update_data(self) -> SoundbarState:
-        _LOGGER.debug("Refreshing soundbar state")
-        previous_source = self.data.input_source if self.data is not None else None
+        _LOGGER.debug("Refreshing soundbar state in an explicit SPP session")
         try:
-            return await self.hass.async_add_executor_job(
-                self._refresh, previous_source
+            state = await self.hass.async_add_executor_job(
+                self._refresh, self._preferred_source
             )
         except (OSError, TimeoutError) as error:
             _LOGGER.warning("Soundbar refresh failed: %s", error, exc_info=True)
             raise UpdateFailed(
                 f"Unable to communicate with {self.address}: {error}"
             ) from error
+        self._record_success(state, powered=True)
+        return state
 
-    def _refresh(self, previous_source: InputSource | None = None) -> SoundbarState:
-        with self._io_lock:
-            try:
-                if self._client.state.connected:
-                    _LOGGER.debug("Querying state on the existing RFCOMM connection")
-                    return self._client.query_state(timeout=COMMAND_TIMEOUT)
-                _LOGGER.info("Opening RFCOMM connection to soundbar %s", self.address)
-                return self._connect(previous_source)
-            except (OSError, TimeoutError):
-                _LOGGER.debug("Closing failed RFCOMM session", exc_info=True)
-                self._client.close()
-                raise
+    def _refresh(self, previous_source: InputSource | None) -> SoundbarState:
+        return self._run_command(None, previous_source)
+
+    async def async_turn_on(self) -> None:
+        await self._async_command(None)
+
+    async def async_power_off(self) -> None:
+        if self._powered is False:
+            return
+        await self._async_command("power_off")
 
     async def async_set_volume(self, volume: int) -> None:
         await self._async_command("set_volume", volume)
@@ -101,42 +121,55 @@ class LGUS60TRCoordinator(DataUpdateCoordinator[SoundbarState]):
     async def async_set_night_mode(self, enabled: bool) -> None:
         await self._async_command("set_night_mode", enabled)
 
-    async def _async_command(self, method: str, *args: Any) -> None:
-        _LOGGER.debug("Running soundbar command %s with arguments %r", method, args)
-        previous_source = self.data.input_source if self.data is not None else None
+    async def _async_command(self, method: str | None, *args: Any) -> None:
+        operation = method or "turn_on"
+        _LOGGER.debug(
+            "Running soundbar operation %s with arguments %r", operation, args
+        )
+        restore_source = (
+            None
+            if method in {"set_input_source", "power_off"}
+            else self._preferred_source
+        )
         try:
             state = await self.hass.async_add_executor_job(
-                partial(self._run_command, method, previous_source, *args)
+                partial(self._run_command, method, restore_source, *args)
             )
         except (OSError, TimeoutError) as error:
-            _LOGGER.exception("Soundbar command %s failed", method)
-            self.async_set_update_error(error)
+            _LOGGER.exception("Soundbar operation %s failed", operation)
             raise HomeAssistantError(
                 f"Unable to send command to {self.address}: {error}"
             ) from error
+        powered = method != "power_off"
+        self._record_success(
+            state,
+            powered=powered,
+            update_source=powered,
+        )
         self.async_set_updated_data(state)
-        _LOGGER.info("Soundbar command %s completed", method)
+        _LOGGER.info("Soundbar operation %s completed", operation)
 
     def _run_command(
         self,
-        method: str,
+        method: str | None,
         previous_source: InputSource | None,
         *args: Any,
     ) -> SoundbarState:
         with self._io_lock:
             try:
-                if not self._client.state.connected:
-                    restore_source = (
-                        None if method == "set_input_source" else previous_source
-                    )
-                    self._connect(restore_source)
-                command = getattr(self._client, method)
-                return command(*args, timeout=COMMAND_TIMEOUT)
-            except (OSError, TimeoutError):
+                if self._client.state.connected:
+                    self._client.query_state(timeout=COMMAND_TIMEOUT)
+                else:
+                    self._connect(previous_source)
+                if method is not None:
+                    command = getattr(self._client, method)
+                    command(*args, timeout=COMMAND_TIMEOUT)
+            finally:
                 self._client.close()
-                raise
+            return self._client.state
 
     def _connect(self, previous_source: InputSource | None) -> SoundbarState:
+        _LOGGER.info("Opening on-demand RFCOMM connection to %s", self.address)
         state = self._client.connect(timeout=CONNECT_TIMEOUT)
         if (
             previous_source is None
@@ -153,19 +186,30 @@ class LGUS60TRCoordinator(DataUpdateCoordinator[SoundbarState]):
             timeout=COMMAND_TIMEOUT,
         )
 
-    def _state_received(self, state: SoundbarState) -> None:
-        _LOGGER.debug("Received pushed soundbar state: %s", state)
-        if not self._shutting_down:
-            self.hass.loop.call_soon_threadsafe(self._async_apply_state, state)
-
     @callback
-    def _async_apply_state(self, state: SoundbarState) -> None:
-        if not self._shutting_down:
-            self.async_set_updated_data(state)
+    def _record_success(
+        self,
+        state: SoundbarState,
+        *,
+        powered: bool,
+        update_source: bool = True,
+    ) -> None:
+        self._powered = powered
+        if update_source and state.input_source is not None:
+            self._preferred_source = state.input_source
+
+        options = dict(self._entry.options)
+        options[CONF_POWERED] = powered
+        if self._preferred_source is not None:
+            options[CONF_LAST_INPUT_SOURCE] = int(self._preferred_source)
+        if options != dict(self._entry.options):
+            self.hass.config_entries.async_update_entry(
+                self._entry,
+                options=options,
+            )
 
     async def async_shutdown(self) -> None:
         _LOGGER.info("Shutting down LG US60TR coordinator")
-        self._shutting_down = True
         await self.hass.async_add_executor_job(self._close)
 
     def _close(self) -> None:

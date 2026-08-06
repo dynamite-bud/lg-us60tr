@@ -31,7 +31,9 @@ class LGUS60TRMediaPlayer(LGUS60TREntity, MediaPlayerEntity):
     _attr_device_class = MediaPlayerDeviceClass.SPEAKER
     _attr_name = None
     _attr_supported_features = (
-        MediaPlayerEntityFeature.VOLUME_SET
+        MediaPlayerEntityFeature.TURN_ON
+        | MediaPlayerEntityFeature.TURN_OFF
+        | MediaPlayerEntityFeature.VOLUME_SET
         | MediaPlayerEntityFeature.SELECT_SOURCE
         | MediaPlayerEntityFeature.SELECT_SOUND_MODE
     )
@@ -43,9 +45,11 @@ class LGUS60TRMediaPlayer(LGUS60TREntity, MediaPlayerEntity):
 
     @property
     @override
-    def state(self) -> MediaPlayerState:
-        """Return the soundbar state while its control channel is connected."""
-        return MediaPlayerState.ON
+    def state(self) -> MediaPlayerState | None:
+        """Return the persisted power state without probing the soundbar."""
+        if self.coordinator.powered is None:
+            return None
+        return MediaPlayerState.ON if self.coordinator.powered else MediaPlayerState.OFF
 
     @property
     @override
@@ -69,6 +73,14 @@ class LGUS60TRMediaPlayer(LGUS60TREntity, MediaPlayerEntity):
     @override
     def sound_mode_list(self) -> list[str]:
         return [mode.label for mode in self.coordinator.data.available_modes]
+
+    @override
+    async def async_turn_on(self) -> None:
+        await self.coordinator.async_turn_on()
+
+    @override
+    async def async_turn_off(self) -> None:
+        await self.coordinator.async_power_off()
 
     @override
     async def async_set_volume_level(self, volume: float) -> None:

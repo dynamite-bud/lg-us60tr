@@ -7,7 +7,11 @@ from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.lg_us60tr.const import DOMAIN
+from custom_components.lg_us60tr.const import (
+    CONF_LAST_INPUT_SOURCE,
+    CONF_POWERED,
+    DOMAIN,
+)
 from custom_components.lg_us60tr.core import InputSource, SoundbarState, SoundMode
 from custom_components.lg_us60tr.diagnostics import async_get_config_entry_diagnostics
 
@@ -25,6 +29,10 @@ TEST_STATE = SoundbarState(
     night_mode=False,
     active_prefix=0xC0,
 )
+ENTRY_OPTIONS = {
+    CONF_LAST_INPUT_SOURCE: int(InputSource.HDMI_IN),
+    CONF_POWERED: True,
+}
 
 
 class FakeSoundbarClient:
@@ -42,14 +50,15 @@ class FakeSoundbarClient:
         self.connect_state = TEST_STATE
 
     def _update(self, **changes: object) -> SoundbarState:
-        self.state = replace(self.state, **changes)
+        self.connect_state = replace(self.connect_state, **changes)
+        self.state = replace(self.connect_state, connected=True)
         if self.listener is not None:
             self.listener(self.state)
         return self.state
 
     def connect(self, timeout: float) -> SoundbarState:
         self.calls.append(("connect", timeout))
-        self.state = self.connect_state
+        self.state = replace(self.connect_state, connected=True)
         if self.listener is not None:
             self.listener(self.state)
         return self.state
@@ -81,6 +90,10 @@ class FakeSoundbarClient:
         self.calls.append(("set_night_mode", enabled))
         return self._update(night_mode=enabled)
 
+    def power_off(self, timeout: float) -> SoundbarState:
+        self.calls.append(("power_off", timeout))
+        return self.state
+
     def close(self) -> None:
         self.calls.append(("close", True))
         self.state = replace(self.state, connected=False)
@@ -94,6 +107,7 @@ async def test_entities_expose_and_dispatch_soundbar_controls(
         title="Living room soundbar",
         unique_id="001122334455",
         data={CONF_ADDRESS: ADDRESS},
+        options=ENTRY_OPTIONS,
     )
     entry.add_to_hass(hass)
 
@@ -103,6 +117,13 @@ async def test_entities_expose_and_dispatch_soundbar_controls(
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
+    coordinator = entry.runtime_data
+    client = coordinator._client
+    assert client.calls == []
+    assert coordinator.update_interval is None
+
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
 
     media_player_id = "media_player.living_room_soundbar"
     woofer_id = "number.living_room_soundbar_woofer_level"
@@ -125,8 +146,6 @@ async def test_entities_expose_and_dispatch_soundbar_controls(
     assert hass.states.get("number.living_room_soundbar_center_level").state == "-4"
     assert hass.states.get("number.living_room_soundbar_rear_level").state == "4"
     assert hass.states.get(night_mode_id).state == "off"
-
-    client = entry.runtime_data._client
 
     await hass.services.async_call(
         "media_player",
@@ -184,6 +203,7 @@ async def test_reconnect_restores_input_selected_before_soundbar_wake(
         title="Living room soundbar",
         unique_id="001122334455",
         data={CONF_ADDRESS: ADDRESS},
+        options=ENTRY_OPTIONS,
     )
     entry.add_to_hass(hass)
 
@@ -206,7 +226,11 @@ async def test_reconnect_restores_input_selected_before_soundbar_wake(
     await coordinator.async_refresh()
     await hass.async_block_till_done()
 
-    assert ("set_input_source", InputSource.HDMI_IN) in client.calls
+    assert client.calls[-3:] == [
+        ("connect", 8.0),
+        ("set_input_source", InputSource.HDMI_IN),
+        ("close", True),
+    ]
     assert coordinator.data.input_source is InputSource.HDMI_IN
     assert await hass.config_entries.async_unload(entry.entry_id)
 
@@ -219,6 +243,7 @@ async def test_command_wake_restores_input_before_applying_control(
         title="Living room soundbar",
         unique_id="001122334455",
         data={CONF_ADDRESS: ADDRESS},
+        options=ENTRY_OPTIONS,
     )
     entry.add_to_hass(hass)
 
@@ -240,10 +265,11 @@ async def test_command_wake_restores_input_before_applying_control(
 
     await coordinator.async_set_volume(25)
 
-    assert client.calls[-3:] == [
+    assert client.calls[-4:] == [
         ("connect", 8.0),
         ("set_input_source", InputSource.HDMI_IN),
         ("set_volume", 25),
+        ("close", True),
     ]
     assert coordinator.data.input_source is InputSource.HDMI_IN
     assert coordinator.data.volume == 25
@@ -258,6 +284,7 @@ async def test_explicit_source_command_skips_wake_restoration(
         title="Living room soundbar",
         unique_id="001122334455",
         data={CONF_ADDRESS: ADDRESS},
+        options=ENTRY_OPTIONS,
     )
     entry.add_to_hass(hass)
 
@@ -279,9 +306,78 @@ async def test_explicit_source_command_skips_wake_restoration(
 
     await coordinator.async_set_input_source("USB")
 
-    assert client.calls[-2:] == [
+    assert client.calls[-3:] == [
         ("connect", 8.0),
         ("set_input_source", "USB"),
+        ("close", True),
     ]
     assert coordinator.data.input_source is InputSource.USB
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_power_controls_are_on_demand_and_release_phone(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Living room soundbar",
+        unique_id="001122334455",
+        data={CONF_ADDRESS: ADDRESS},
+        options=ENTRY_OPTIONS,
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.lg_us60tr.coordinator.SoundbarClient",
+        FakeSoundbarClient,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data
+    client = coordinator._client
+    media_player_id = "media_player.living_room_soundbar"
+
+    await hass.services.async_call(
+        "media_player",
+        "turn_off",
+        {"entity_id": media_player_id},
+        blocking=True,
+    )
+
+    assert client.calls == [
+        ("connect", 8.0),
+        ("power_off", 3.0),
+        ("close", True),
+    ]
+    assert coordinator.powered is False
+    assert hass.states.get(media_player_id).state == "off"
+    assert entry.options[CONF_POWERED] is False
+    assert entry.options[CONF_LAST_INPUT_SOURCE] == int(InputSource.HDMI_IN)
+
+    calls_after_power_off = list(client.calls)
+    await coordinator.async_power_off()
+    assert client.calls == calls_after_power_off
+
+    client.connect_state = replace(
+        TEST_STATE,
+        input_source=InputSource.BLUETOOTH,
+        active_prefix=0x07,
+    )
+    await hass.services.async_call(
+        "media_player",
+        "turn_on",
+        {"entity_id": media_player_id},
+        blocking=True,
+    )
+
+    assert client.calls[-3:] == [
+        ("connect", 8.0),
+        ("set_input_source", InputSource.HDMI_IN),
+        ("close", True),
+    ]
+    assert coordinator.powered is True
+    assert coordinator.data.input_source is InputSource.HDMI_IN
+    assert hass.states.get(media_player_id).state == "on"
+    assert entry.options[CONF_POWERED] is True
     assert await hass.config_entries.async_unload(entry.entry_id)

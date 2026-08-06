@@ -122,13 +122,21 @@ class LinuxRFCOMMTransport:
         except BlockingIOError:
             return b""
         except (OSError, ValueError) as error:
-            _LOGGER.exception("RFCOMM receive failed")
-            self._mark_disconnected(candidate)
-            raise TransportDisconnected("RFCOMM receive failed") from error
+            was_connected = self._mark_disconnected(candidate)
+            if was_connected:
+                _LOGGER.exception("RFCOMM receive failed")
+                message = "RFCOMM receive failed"
+            else:
+                _LOGGER.debug("RFCOMM read stopped after local close: %s", error)
+                message = "RFCOMM channel closed"
+            raise TransportDisconnected(message) from error
         if not data:
-            _LOGGER.warning("Soundbar closed the RFCOMM channel")
-            self._mark_disconnected(candidate)
-            raise TransportDisconnected("RFCOMM peer closed the channel")
+            was_connected = self._mark_disconnected(candidate)
+            if was_connected:
+                _LOGGER.warning("Soundbar closed the RFCOMM channel")
+                raise TransportDisconnected("RFCOMM peer closed the channel")
+            _LOGGER.debug("RFCOMM read stopped after local close")
+            raise TransportDisconnected("RFCOMM channel closed")
         return data
 
     def write(self, data: bytes, timeout: float = 5.0) -> None:
@@ -190,9 +198,11 @@ class LinuxRFCOMMTransport:
             raise TransportDisconnected("RFCOMM channel is not open")
         return candidate
 
-    def _mark_disconnected(self, candidate: socket.socket) -> None:
+    def _mark_disconnected(self, candidate: socket.socket) -> bool:
         with self._lock:
-            if self._socket is candidate:
+            was_connected = self._socket is candidate
+            if was_connected:
                 self._socket = None
                 self._channel = None
         candidate.close()
+        return was_connected

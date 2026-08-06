@@ -59,6 +59,8 @@ class FakeTransport:
                 )
         elif frame.command == 0x000B:
             response = Frame(0x00, 0x0B, bytes((self.active_prefix,)))
+        elif frame.command == 0x000A and frame.payload == b"\x00":
+            response = Frame(0x00, 0x0A, b"\x00")
         elif frame.command == 0x0001 and len(frame.payload) == 1:
             self.active_prefix = (
                 0xD0
@@ -168,6 +170,7 @@ class ClientTests(unittest.TestCase):
         self.client.set_center_level(-3, timeout=1.0)
         self.client.set_rear_level(3, timeout=1.0)
         self.client.set_night_mode(True, timeout=1.0)
+        self.client.power_off(timeout=1.0)
         encoded = [frame.encode().hex() for frame in self.transport.writes]
         self.assertIn("4154070202641387", encoded)
         self.assertIn("4154071f020002fc", encoded)
@@ -175,6 +178,7 @@ class ClientTests(unittest.TestCase):
         self.assertIn("41540d2601fd02", encoded)
         self.assertIn("41540d210103fc", encoded)
         self.assertIn("4154074a0101fe", encoded)
+        self.assertIn("4154000a0100ff", encoded)
 
     def test_input_function_switches_match_captured_frames(self) -> None:
         expected = {

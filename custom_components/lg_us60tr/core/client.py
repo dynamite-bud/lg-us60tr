@@ -13,6 +13,7 @@ from .commands import (
     HANDSHAKE_STAGE,
     HANDSHAKE_START,
     INITIAL_CAPABILITY_QUERY,
+    POWER_OFF,
     PREFIX_QUERY,
     SESSION_READY,
     SOUND_MODE_REGISTRATION,
@@ -277,6 +278,16 @@ class SoundbarClient:
         )
         return self.state
 
+    def power_off(self, timeout: float = 3.0) -> SoundbarState:
+        """Turn the soundbar off and wait for its captured command echo."""
+        before = self._observation("power_off")
+        self.send_frame(POWER_OFF)
+        self._wait_for(
+            lambda state: self._observation("power_off") > before,
+            timeout,
+        )
+        return self.state
+
     def send_command(self, major: int, minor: int, payload: bytes = b"") -> None:
         """Send a raw research frame; typed integrations should not expose this method."""
         self.send_frame(Frame(major, minor, payload))
@@ -323,7 +334,9 @@ class SoundbarClient:
         updates: dict[str, object] = {}
         observed: set[str] = set()
 
-        if frame.command == 0x000B and len(payload) == 1:
+        if frame == POWER_OFF:
+            observed.add("power_off")
+        elif frame.command == 0x000B and len(payload) == 1:
             active_prefix = payload[0]
             input_source = InputSource.from_active_prefix(active_prefix)
             updates["active_prefix"] = active_prefix

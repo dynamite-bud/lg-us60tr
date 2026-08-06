@@ -35,6 +35,8 @@ class FakeSocket:
 
     def recv(self, size: int) -> bytes:
         del size
+        if self.closed:
+            raise OSError(9, "Bad file descriptor")
         return self.incoming.pop(0)
 
     def send(self, data: memoryview) -> int:
@@ -141,6 +143,29 @@ class LinuxTransportTests(unittest.TestCase):
         self.assertFalse(transport.connected)
         self.assertIsNone(transport.channel)
         self.assertTrue(connected.closed)
+
+    def test_local_close_during_read_is_not_logged_as_transport_failure(self) -> None:
+        connected = FakeSocket(incoming=[b""])
+        factory = SocketFactory([connected])
+        transport = LinuxRFCOMMTransport("00:11:22:33:44:55", (2,))
+
+        with self._patch_socket_api(factory):
+            transport.connect(timeout=2.0)
+
+            def close_before_recv(*args: object) -> tuple[list[FakeSocket], list, list]:
+                transport.close()
+                return [connected], [], []
+
+            with (
+                patch("lg_us60tr.linux.select.select", close_before_recv),
+                self.assertLogs("lg_us60tr.linux", level="DEBUG") as captured,
+                self.assertRaisesRegex(TransportDisconnected, "channel closed"),
+            ):
+                transport.read(timeout=1.0)
+
+        messages = "\n".join(captured.output)
+        self.assertIn("read stopped after local close", messages)
+        self.assertNotIn("ERROR", messages)
 
     def test_connection_failure_reports_each_channel(self) -> None:
         factory = SocketFactory(
