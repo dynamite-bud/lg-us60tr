@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lg-us60tr"
+version = "0.1.0"
+description = "Local Bluetooth control for LG US60TR/S70T-family soundbars"
+requires-python = ">=3.11"
+dependencies = [
+  "pyobjc-framework-IOBluetooth>=12.2; sys_platform == 'darwin'",
+]
+
+[project.scripts]
+lg-us60tr = "lg_us60tr.cli:main"
+
+[tool.setuptools]
+packages = ["lg_us60tr"]
+package-dir = {lg_us60tr = "custom_components/lg_us60tr/core"}
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

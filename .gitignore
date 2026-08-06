@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Build outputs
+build/
+dist/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+
+# Local interoperability research. These artifacts can contain third-party
+# code, device identifiers, or large binary captures and are not distributed.
+research/apk/
+research/captures/
+research/decompiled/
+research/ui/
+
+# Local deployment material and credentials
+*.pem
+*.key
+*known-hosts*

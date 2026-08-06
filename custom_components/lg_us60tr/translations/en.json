@@ -1,0 +1,39 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to the soundbar",
+        "description": "Pair the soundbar with the Home Assistant host first, then enter its Bluetooth address.",
+        "data": {
+          "address": "Bluetooth address"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to open the soundbar control channel. Confirm it is powered on, paired with this Home Assistant host, and not connected to another ThinQ controller.",
+      "invalid_address": "Enter a valid 12-digit Bluetooth address.",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This soundbar is already configured."
+    }
+  },
+  "entity": {
+    "number": {
+      "woofer_level": {
+        "name": "Woofer level"
+      },
+      "center_level": {
+        "name": "Center level"
+      },
+      "rear_level": {
+        "name": "Rear level"
+      }
+    },
+    "switch": {
+      "night_mode": {
+        "name": "Night mode"
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "domain": "lg_us60tr",
+  "name": "LG US60TR Soundbar",
+  "codeowners": ["@dynamite-bud"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/dynamite-bud/lg-us60tr",
+  "issue_tracker": "https://github.com/dynamite-bud/lg-us60tr/issues",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "requirements": [],
+  "version": "0.1.0"
+}
