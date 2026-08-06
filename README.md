@@ -18,6 +18,7 @@ Verified controls:
 - Rear level: -6…6
 - Night mode
 - State refresh, pushed state changes, reconnect, availability, and privacy-safe diagnostics
+- Automatic restoration of the last known input when a reconnect wakes the soundbar on Bluetooth
 
 There is no separately captured HDMI-CEC function. The fourth function exposed by the soundbar and ThinQ is **Optical / HDMI ARC**.
 

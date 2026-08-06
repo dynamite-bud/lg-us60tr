@@ -98,7 +98,7 @@ Open the integration entry, select the menu, and download diagnostics. The repor
 
 ## Source changes unexpectedly
 
-On Linux/Home Assistant, the integration opens only an RFCOMM socket. During live verification this preserved the selected source except when an explicit source command was sent.
+On Linux/Home Assistant, the integration opens only an RFCOMM socket. If a reconnect wakes the soundbar on Bluetooth, the coordinator restores the last input it observed before completing the refresh or command. Explicit source selections bypass this restoration. A first connection with no previously observed source has nothing safe to restore.
 
 On macOS, `IOBluetooth` was observed to establish A2DP alongside RFCOMM. A2DP can switch the soundbar to Bluetooth even when CoreAudio still outputs through another device. This is a platform/profile side effect; BLE is not an alternate control path for the tested soundbar.
 

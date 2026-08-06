@@ -15,6 +15,7 @@ Live Home Assistant verification covered:
 - Woofer, center, and rear level entities
 - Night mode off/on behavior
 - Clean source restoration after testing
+- Physical standby wake initially reporting Bluetooth, followed by automatic restoration to HDMI In
 
 The latest user-visible entity state supplied during consolidation showed woofer `2`, center `-4`, rear `4`, and night mode `Off`.
 
@@ -32,6 +33,8 @@ The latest user-visible entity state supplied during consolidation showed woofer
 
 The LG US70TR(D0) is the only live-tested model. No independent HDMI-CEC setter was observed; the UI's fourth captured function is Optical / HDMI ARC. macOS can initiate A2DP while opening RFCOMM and may switch the soundbar to Bluetooth, so it is not the preferred always-on host.
 
+The Home Assistant coordinator restores the last source it observed when a reconnect wakes the soundbar on Bluetooth. Explicit source selections bypass restoration. A first connection with no previously observed source has nothing safe to restore.
+
 ## Distribution and optional future work
 
 The canonical repository is `https://github.com/dynamite-bud/lg-us60tr`. It can be added to HACS as a custom repository in the **Integration** category.
@@ -41,4 +44,4 @@ The functional deliverable is complete. Optional follow-up work:
 1. Submit the repository for inclusion in HACS defaults if broader distribution is wanted.
 2. Collect hardware-backed compatibility reports for additional US60TR/S70T variants.
 
-No temporary Home Assistant SSH key, API token, or deployment credential is retained by this workspace.
+No deployment credential is stored in this repository. The dedicated SSH key and Home Assistant API token used for live administration are retained outside the workspace in the operator's SSH directory and macOS login Keychain.

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Restore the last known input when a Home Assistant reconnect wakes the soundbar on Bluetooth; explicit source selections remain authoritative.
+- Add regression coverage for refresh-driven wake, command-driven wake, and explicit source selection.
+
 ## 0.1.0 — 2026-08-06
 
 Initial consolidated release.

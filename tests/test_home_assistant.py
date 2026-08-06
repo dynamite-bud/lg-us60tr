@@ -39,6 +39,7 @@ class FakeSoundbarClient:
         self.channel = 2
         self.listener = listener
         self.calls: list[tuple[str, object]] = []
+        self.connect_state = TEST_STATE
 
     def _update(self, **changes: object) -> SoundbarState:
         self.state = replace(self.state, **changes)
@@ -48,7 +49,7 @@ class FakeSoundbarClient:
 
     def connect(self, timeout: float) -> SoundbarState:
         self.calls.append(("connect", timeout))
-        self.state = TEST_STATE
+        self.state = self.connect_state
         if self.listener is not None:
             self.listener(self.state)
         return self.state
@@ -61,9 +62,12 @@ class FakeSoundbarClient:
         self.calls.append(("set_volume", volume))
         return self._update(volume=volume)
 
-    def set_input_source(self, source: str, timeout: float) -> SoundbarState:
+    def set_input_source(
+        self, source: InputSource | str, timeout: float
+    ) -> SoundbarState:
         self.calls.append(("set_input_source", source))
-        return self._update(input_source=InputSource.from_name(source))
+        resolved = InputSource.from_name(source) if isinstance(source, str) else source
+        return self._update(input_source=resolved)
 
     def set_sound_mode(self, mode: str, timeout: float) -> SoundbarState:
         self.calls.append(("set_sound_mode", mode))
@@ -169,4 +173,115 @@ async def test_entities_expose_and_dispatch_soundbar_controls(
     assert diagnostics["state"]["input_source"] == "USB"
     assert diagnostics["state"]["sound_mode"] == "Standard"
 
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_reconnect_restores_input_selected_before_soundbar_wake(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Living room soundbar",
+        unique_id="001122334455",
+        data={CONF_ADDRESS: ADDRESS},
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.lg_us60tr.coordinator.SoundbarClient",
+        FakeSoundbarClient,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data
+    client = coordinator._client
+    client.connect_state = replace(
+        TEST_STATE,
+        input_source=InputSource.BLUETOOTH,
+        active_prefix=0x07,
+    )
+    client.state = replace(client.state, connected=False)
+
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert ("set_input_source", InputSource.HDMI_IN) in client.calls
+    assert coordinator.data.input_source is InputSource.HDMI_IN
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_command_wake_restores_input_before_applying_control(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Living room soundbar",
+        unique_id="001122334455",
+        data={CONF_ADDRESS: ADDRESS},
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.lg_us60tr.coordinator.SoundbarClient",
+        FakeSoundbarClient,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data
+    client = coordinator._client
+    client.connect_state = replace(
+        TEST_STATE,
+        input_source=InputSource.BLUETOOTH,
+        active_prefix=0x07,
+    )
+    client.state = replace(client.state, connected=False)
+
+    await coordinator.async_set_volume(25)
+
+    assert client.calls[-3:] == [
+        ("connect", 8.0),
+        ("set_input_source", InputSource.HDMI_IN),
+        ("set_volume", 25),
+    ]
+    assert coordinator.data.input_source is InputSource.HDMI_IN
+    assert coordinator.data.volume == 25
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_explicit_source_command_skips_wake_restoration(
+    hass: HomeAssistant,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Living room soundbar",
+        unique_id="001122334455",
+        data={CONF_ADDRESS: ADDRESS},
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.lg_us60tr.coordinator.SoundbarClient",
+        FakeSoundbarClient,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data
+    client = coordinator._client
+    client.connect_state = replace(
+        TEST_STATE,
+        input_source=InputSource.BLUETOOTH,
+        active_prefix=0x07,
+    )
+    client.state = replace(client.state, connected=False)
+
+    await coordinator.async_set_input_source("USB")
+
+    assert client.calls[-2:] == [
+        ("connect", 8.0),
+        ("set_input_source", "USB"),
+    ]
+    assert coordinator.data.input_source is InputSource.USB
     assert await hass.config_entries.async_unload(entry.entry_id)
